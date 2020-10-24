@@ -1,0 +1,181 @@
+version: '3.4'
+
+#docker compose for basic docker stack
+services:
+#motioneye for running CCTV cameras
+  motioneye:
+    container_name: MotionEye
+    ports:
+        - '8765:8765'
+    volumes:
+        - '/etc/localtime:/etc/localtime:ro'
+        - '/etc/motioneye:/etc/motioneye'
+        - '*STORAGE_POINT*:/var/lib/motioneye'
+    restart: always
+    image: 'ccrisan/motioneye:master-armhf'
+
+#Unifi controller for running the APs    
+  Unifi:
+    restart: unless-stopped
+    ports:
+        - '8752:8080'
+        - '8443:8443'
+        - '3478:3478/udp'
+        - '10001:10001/udp'
+    volumes:
+        - '*STORAGE_POINT*:/unifi'
+    envronment:
+        - TZ=${TZ}
+    container_name: unifi_controller
+    image: 'jacobalberty/unifi:arm32v7'
+ 
+ # Telegraf for reporting server stats to the database   
+  Telegraf:
+    image: arm32v7/telegraf
+    container_name: Telegraf
+    network_mode: service:InfluxDB
+    environment:
+      - VERSION=docker
+      - PUID=1000
+      - PGID=1000
+      - HOST_ETC=/rootfs/etc
+      - HOST_PROC=/rootfs/proc
+      - HOST_SYS=/rootfs/sys
+      - HOST_MOUNT_PREFIX=/rootfs
+    volumes:
+      - /:/rootfs:ro
+      - *STORAGE_POINT*:/etc/telegraf/telegraf.conf:ro
+    restart: unless-stopped
+
+    #Grafana for plotting data from database
+  Grafana:
+    image: grafana/grafana:latest
+    container_name: Grafana
+    network_mode: host
+    environment:
+      - VERSION=docker
+      - PUID=1000
+      - PGID=1000
+    user: "104"
+    ports:
+      - 3000:3000
+    volumes:
+      - *STORAGE_POINT*:/var/lib/grafana
+    restart: unless-stopped
+
+    # InfluxDB database for holding all data
+  InfluxDB:
+    image: hypriot/rpi-influxdb
+    container_name: InfluxDB
+    network_mode: host
+    environment:
+      - VERSION=docker
+      - PUID=1000
+      - PGID=1000
+    volumes:
+      - *STORAGE_POINT*:/data
+      - *STORAGE_POINT*:/var/lib/influxdb
+    ports:
+      - 8086:8086
+    restart: unless-stopped
+
+    #Plex Server for Media
+  plex:
+    image: linuxserver/plex:latest
+    container_name: plex
+    network_mode: host
+    environment:
+      - VERSION=docker
+      - PUID=1000
+      - PGID=1000
+    volumes:
+      - *STORAGE_POINT*:/config
+    restart: unless-stopped
+
+    #Plex monitor for tracking logs and usage
+  plex_monitor:
+    container_name: plex_monitor
+    image: linuxserver/tautulli:latest
+    restart: unless-stopped
+    volumes:
+      - *STORAGE_POINT*:/config
+      - *STORAGE_POINT*:/logs:ro
+    environment:
+      - TZ=Europe/London
+    ports:
+      - 8181:8181
+
+      #VPN for piping other container through 
+  vpn:
+    image: qmcgaw/private-internet-access:latest
+    container_name: vpn
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun
+    network_mode: delVPN
+    ports:
+      - 8888:8888/tcp
+      - 8388:8388/tcp
+      - 8388:8388/udp
+      - 58846:58846/tcp
+      - 58846:58846/udp
+      - 58946:58946/tcp
+      - 8112:8112/tcp
+      - 9117:9117/tcp
+
+    environment:
+      - USER=***
+      - PASSWORD=***
+      - ENCRYPTION=strong
+      - PROTOCOL=udp
+      - REGION=Belgium
+      - DOT=on
+      - DOT_PROVIDERS=cloudflare
+      - BLOCK_MALICIOUS=on
+      - BLOCK_SURVEILLANCE=on
+      - BLOCK_ADS=off
+      - UNBLOCK=
+      - EXTRA_SUBNETS=192.168.1.0/24
+      - TINYPROXY=off
+      - TINYPROXY_LOG=Info
+      - TINYPROXY_USER=
+      - TINYPROXY_PASSWORD=
+      - SHADOWSOCKS=off
+      - SHADOWSOCKS_LOG=on
+      - SHADOWSOCKS_PORT=8388
+      - SHADOWSOCKS_PASSWORD=
+    restart: always
+    
+    #MQTT server as messaging broker
+  mosquitto:
+    image: arm32v6/eclipse-mosquitto
+    hostname: mosquitto
+    container_name: MQTT_broker
+    ports:
+      - "1883:1883"
+      - "9001:9001"
+    volumes:
+      - ./mosquitto/mosquitto.conf:
+      
+    #Node Red for home automation
+  node-red:
+    image: nodered/node-red:latest
+    ports:
+      - "1880:1880"
+    volumes:
+      - node-red-data:/data
+
+    
+    #Portainer for monitoring docker containers
+  portainer:
+    image: portainer/portainer
+    restart: always
+    ports:
+      - 9000:9000
+      - 8000:8000
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - portainer_data:/data
+
+
